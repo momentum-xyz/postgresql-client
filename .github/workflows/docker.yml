@@ -12,7 +12,7 @@ on:
       - v*
 
 env:
-  IMAGE_NAME: postgres-client
+  IMAGE_NAME: ${{ github.event.repository.name }}
   REPO_PATH: ${{ github.repository_owner }}
   DB_NAME: initech
   DB_USER: user
