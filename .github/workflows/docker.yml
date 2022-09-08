@@ -1,0 +1,86 @@
+name: Docker
+
+on:
+  push:
+    # Publish `main` as Docker `latest` image.
+    branches:
+      - master
+      - main
+
+    # Publish `v1.2.3` tags as releases.
+    tags:
+      - v*
+
+env:
+  IMAGE_NAME: postgres-client
+  REPO_PATH: ${{ github.repository_owner }}
+  DB_NAME: initech
+  DB_USER: user
+  DB_PASS: pass
+
+jobs:
+  # Push image to GitHub Packages.
+  # See also https://docs.docker.com/docker-hub/builds/
+  push:
+    name: Build, test and push image.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_PASSWORD: ${{ env.DB_PASS }}
+          POSTGRES_USER: ${{ env.DB_USER }}
+          POSTGRES_DB: ${{ env.DB_NAME }}
+          POSTGRES_INITDB_ARGS: --no-sync --no-locale
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build image
+        run: docker build . --file Dockerfile --tag $IMAGE_NAME
+
+      - name: Test image
+        run: |
+          docker run --rm --network ${{ job.container.network}} --entrypoint pg_isready \
+            -e PGPASSWORD=$DB_PASS $IMAGE_NAME:latest -h postgres -U $DB_USER \
+            || exit 1;
+          echo "SELECT 'Test';" | \
+            docker run --rm --network ${{ job.container.network}} --interactive \
+            $IMAGE_NAME:latest postgres://$DB_USER:$DB_PASS@postgres/$DB_NAME -t \
+            ;
+
+      - name: Log into registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push image
+        run: |
+          IMAGE_ID=ghcr.io/$REPO_PATH/$IMAGE_NAME
+
+          # Change all uppercase to lowercase
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+
+          # Strip git ref prefix from version
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+
+          # Strip "v" prefix from tag name
+          [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
+
+          # Use Docker `latest` tag convention
+          [ "$VERSION" == "master" ]  || [ "$VERSION" == "main" ] && VERSION=latest
+
+          echo IMAGE_ID=$IMAGE_ID
+          echo VERSION=$VERSION
+
+          docker tag $IMAGE_NAME $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:$VERSION
