@@ -25,7 +25,6 @@ jobs:
   push:
     name: Build, test and push image.
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
 
     permissions:
       contents: read
